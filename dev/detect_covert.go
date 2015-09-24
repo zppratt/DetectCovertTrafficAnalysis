@@ -2,16 +2,15 @@ package main
 
 import (
 	"bufio"
-	//	"bytes"
+	"bytes"
 	"flag"
 	"fmt"
-	//	"io"
+	"io"
 	"os"
 	"os/exec"
 	"regexp"
 	"sort"
 	"strconv"
-//	"io/ioutil"
 )
 
 var ipFiles = map[string]string{}
@@ -25,22 +24,19 @@ func check(err error) {
 }
 
 // Call tshark and create the .useful file. Returns 0 on success, 1 on error.
-func extract_useful(path *string) int {
-	fmt.Println("\nextract_useful():")
-	fmt.Println("Reading " + *path)
-
+func extract_useful(path *string) *string {
+	useful := *path + ".useful"
+	fmt.Println("Processing file \"" + useful + "\"")
 	// Run tshark command, save .useful file
-	fmt.Println("Creating " + *path + ".useful")
-	err := exec.Command("sh", "-c", "/usr/bin/tshark -r "+*path+" -V | egrep \"Source:|Destination:|Time since reference or first frame:\" | grep -v \"Vmware\" > "+*path+".useful").Run()
+	fmt.Println("Creating \"" + useful + "\"")
+	err := exec.Command("sh", "-c", "/usr/bin/tshark -r "+*path+" -V | egrep \"Source|Destination|Time since reference or first frame:\" | grep -v \"Vmware\" > "+useful).Run()
 	check(err)
-
-	fmt.Println("Successfully created .useful file")
-	return 0
+	fmt.Println("Successfully created \"" + useful + "\"")
+	return &useful
 }
 
 // Extract the absolute time stamps for each IP pair, and write them to the corresponding . Returns 0 on success, 1 on error.
-func organize_ipd(threads *int, path *string) int {
-	fmt.Println("\norganize_ipd():")
+func organize_ipd(useful *string) int {
 
 	// Open .useful file
 	//	file, err := os.Open(*path + ".useful")
@@ -56,10 +52,7 @@ func organize_ipd(threads *int, path *string) int {
 	//	linesPerProcessor := (lines / *threads)
 	//	fmt.Println("Number of lines for each thread:", linesPerProcessor)
 
-	// Extract time stamps in .useful file using "threads" number of threads
-	fmt.Println("Starting " + *path + ".useful parsing with " + strconv.Itoa(*threads) + " threads.")
-
-	f, err := os.Open("input.dump.useful")
+	f, err := os.Open(*useful)
 	check(err)
 	defer f.Close()
 
@@ -68,16 +61,27 @@ func organize_ipd(threads *int, path *string) int {
 	// Set up regex patterns
 	var time_stamp = regexp.MustCompile("[0-9][.][0-9]{9}")
 	var ip_addr = regexp.MustCompile("([0-9]{1,3}[\\.]){3}[0-9]{1,3}")
-	var dest = regexp.MustCompile("Destination")
 	var src = regexp.MustCompile("Source")
+	var dest = regexp.MustCompile("Destination")
+	var port = regexp.MustCompile("[0-9]{5}")
+	var src_port_regex = regexp.MustCompile("Source Port: [0-9]{5}")
+	var dest_port_regex = regexp.MustCompile("Destination Port: [0-9]{5}")
 
+	// Create string to hold relevant information
 	var source_ip string
 	var dest_ip string
+	var source_port string
+	var dest_port string
 	var time float64
-	var ip_combo string
+	var ip_combo_with_port string
+
+	// Count lines in the file
+	num_lines, err := countLines("input.dump.useful")
+	check(err)
+	fmt.Println("Processing " + strconv.Itoa(num_lines) + " lines of .useful file.")
 
 	var line string
-	for lnum := 0; lnum < 99999; lnum++ {
+	for lnum := 0; lnum < num_lines; lnum++ {
 		//		fmt.Println("Checking line ", lnum)
 		line, err = bf.ReadString(byte('\n'))
 		check(err)
@@ -86,45 +90,47 @@ func organize_ipd(threads *int, path *string) int {
 			time, err = strconv.ParseFloat(time_stamp.FindString(line), 64)
 			check(err)
 		}
+		if src_port_regex.FindString(line) != "" {
+			source_port = port.FindString(line)
+			//						fmt.Printf("Source port found:%s\n", source_port)
+		}
+		if dest_port_regex.FindString(line) != "" {
+			dest_port = port.FindString(line)
+			//						fmt.Printf("Source port found:%s\n", dest_port)
+		}
 		// If this line contains the word "Source" and an IP address, set the source IP address
 		if src.FindString(line) != "" && ip_addr.FindString(line) != "" {
 			source_ip = ip_addr.FindString(line)
-			//			fmt.Printf("Assigning %s as source\n", source_ip)
+			//						fmt.Printf("Assigning %s/ as source\n", source_ip)
 			/*
 				If this line contains the word "Destination" and an IP address, set the destination IP address
 				and create a unique mapping from source to destination
 			*/
 		} else if dest.FindString(line) != "" && ip_addr.FindString(line) != "" {
 			dest_ip = ip_addr.FindString(line)
-			//			fmt.Printf("Assigning %s as destination\n", dest_ip)
-			if source_ip != "" {
+			if source_ip != "" && source_ip != "" && dest_port != "" {
 				ipFiles[source_ip] = dest_ip
 				check(err)
-				//				fmt.Printf("Creating mapping %s_%s for timestamp %f\n", source_ip, dest_ip, time)
-				ip_combo = source_ip + "_" + dest_ip
-				timestamps[ip_combo] = append(timestamps[ip_combo], time)
+				ip_combo_with_port = source_ip + "_" + dest_ip + "_" + source_port + "_" + dest_port
+				timestamps[ip_combo_with_port] = append(timestamps[ip_combo_with_port], time)
 				// Sort timestamps, inefficient, eh...
-				sort.Float64s(timestamps[ip_combo])
+				sort.Float64s(timestamps[ip_combo_with_port])
 			}
 		}
 	}
-
-	for key, value := range ipFiles {
-		fmt.Println("Key:", key, "Value:", value)
-	}
-	fmt.Println("***")
 	var to_write string
-	for key, value := range timestamps {
+	var files_created int = 0
+	for key, _ := range timestamps {
 		for _, time := range timestamps[key] {
 			to_write += strconv.FormatFloat(time, 'f', -1, 64) + "\n"
 		}
-		file, err := os.Create(key)
+		file, err := os.Create("portfiles/" + key)
+		files_created++
 		check(err)
-		fmt.Println("Key:", key, "Value:", value)
 		_, err = file.WriteString(to_write)
-		to_write=""
+		to_write = ""
 	}
-
+	fmt.Println(files_created, "files created for ip/port combination timestamps.")
 	return 0
 }
 
@@ -133,48 +139,40 @@ func extract_pid() int {
 	return 0
 }
 
-//func countLines(r io.Reader) (int, error) {
-//	buf := make([]byte, 8196)
-//	count := 0
-//	lineSep := []byte{'\n'}
-//
-//	for {
-//		c, err := r.Read(buf)
-//		if err != nil && err != io.EOF {
-//			return count, err
-//		}
-//
-//		count += bytes.Count(buf[:c], lineSep)
-//
-//		if err == io.EOF {
-//			break
-//		}
-//	}
-//
-//	return count, nil
-//}
+func countLines(path string) (int, error) {
+	r, err := os.Open(path)
+	check(err)
+	buf := make([]byte, 8196)
+	count := 0
+	lineSep := []byte{'\n'}
+
+	for {
+		c, err := r.Read(buf)
+		if err != nil && err != io.EOF {
+			return count, err
+		}
+
+		count += bytes.Count(buf[:c], lineSep)
+
+		if err == io.EOF {
+			break
+		}
+	}
+
+	return count, nil
+}
 
 func main() {
-	fmt.Println("\nmain():")
-
 	// Custom name for the .useful file
 	path, _ := os.Getwd()
 	var dump = path + "/" + *flag.String("dump", "input.dump", "The name of the input file")
-	fmt.Println(dump)
-	// Number of threads to use as a command line argument
-	var threads = flag.String("threads", "1", "The number of threads to use while parsing output")
 	flag.Parse()
 
-	// Convert threads flag value to int
-	t, err := strconv.Atoi(*threads)
-	check(err)
-
-	fmt.Println(*threads + " thread(s) being used to parse .useful file.")
-
 	// Run tshark on .dump file and create .useful file
-	extract_useful(&dump)
+	useful := extract_useful(&dump)
 
-	organize_ipd(&t, &dump)
+	fmt.Println("Organizing \"" + *useful + "\"")
+	organize_ipd(useful)
 
 	//extract_pid()
 }
