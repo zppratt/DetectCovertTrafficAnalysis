@@ -1,3 +1,20 @@
+/*
+
+Zachary Paul Pratt
+CS350
+9/24/15
+
+"By placing this statement in my work, I certify that I have read and understand the IPFW
+Honor Code. I am fully aware of the following sections of the Honor Code: Extent of the
+Honor Code, Responsibility of the Student and Penalty. This project or subject material
+has not been used in another class by me or any other student. Finally, I certify that this
+site is not for commercial purposes, which is a violation of the IPFW Responsible Use of
+Computing (RUC) Policy."
+
+ZACHARY P. PRATT, 9/23/15
+
+*/
+
 package main
 
 import (
@@ -36,7 +53,7 @@ func extract_useful(path *string) *string {
 }
 
 // Extract the absolute time stamps for each IP pair, and write them to the corresponding . Returns 0 on success, 1 on error.
-func organize_ipd(useful *string) int {
+func organize_ipd(useful *string) {
 
 	// Open .useful file
 	//	file, err := os.Open(*path + ".useful")
@@ -82,7 +99,7 @@ func organize_ipd(useful *string) int {
 
 	var line string
 	for lnum := 0; lnum < num_lines; lnum++ {
-		//		fmt.Println("Checking line ", lnum)
+		// Read the line
 		line, err = bf.ReadString(byte('\n'))
 		check(err)
 		// If this line is a timestamp, set the timestamp
@@ -92,11 +109,9 @@ func organize_ipd(useful *string) int {
 		}
 		if src_port_regex.FindString(line) != "" {
 			source_port = port.FindString(line)
-			//						fmt.Printf("Source port found:%s\n", source_port)
 		}
 		if dest_port_regex.FindString(line) != "" {
 			dest_port = port.FindString(line)
-			//						fmt.Printf("Source port found:%s\n", dest_port)
 		}
 		// If this line contains the word "Source" and an IP address, set the source IP address
 		if src.FindString(line) != "" && ip_addr.FindString(line) != "" {
@@ -124,14 +139,13 @@ func organize_ipd(useful *string) int {
 		for _, time := range timestamps[key] {
 			to_write += strconv.FormatFloat(time, 'f', -1, 64) + "\n"
 		}
-		file, err := os.Create("portfiles/" + key)
+		file, err := os.Create("output/" + key)
 		files_created++
 		check(err)
 		_, err = file.WriteString(to_write)
 		to_write = ""
 	}
 	fmt.Println(files_created, "files created for ip/port combination timestamps.")
-	return 0
 }
 
 // Display results (???). Returns 0 on success, 1 on error.
@@ -145,20 +159,16 @@ func countLines(path string) (int, error) {
 	buf := make([]byte, 8196)
 	count := 0
 	lineSep := []byte{'\n'}
-
 	for {
 		c, err := r.Read(buf)
 		if err != nil && err != io.EOF {
 			return count, err
 		}
-
 		count += bytes.Count(buf[:c], lineSep)
-
 		if err == io.EOF {
 			break
 		}
 	}
-
 	return count, nil
 }
 
