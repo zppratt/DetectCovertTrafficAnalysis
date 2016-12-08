@@ -1,1 +1,3 @@
-# cs350-pr1
+#Covert Traffic Analysis
+
+This application sniffs a network and looks for suspect traffic.
